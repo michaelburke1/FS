@@ -45,7 +45,14 @@ void fs_debug()
 	disk_read(0,block.data);
 
 	printf("superblock:\n");
-	printf("    %d blocks\n",block.super.nblocks);
+	if (block.super.magic)
+    {
+        printf("    magic number is valid\n");
+    } else
+    {
+        printf("    magic number is not valid\n");
+    }
+    printf("    %d blocks\n",block.super.nblocks);
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes\n",block.super.ninodes);
 }
