@@ -79,7 +79,7 @@ int main( int argc, char *argv[] )
 			} else {
 				printf("use: getsize <inumber>\n");
 			}
-			
+
 		} else if(!strcmp(cmd,"create")) {
 			if(args==1) {
 				inumber = fs_create();
@@ -97,7 +97,7 @@ int main( int argc, char *argv[] )
 				if(fs_delete(inumber)) {
 					printf("inode %d deleted.\n",inumber);
 				} else {
-					printf("delete failed!\n");	
+					printf("delete failed!\n");
 				}
 			} else {
 				printf("use: delete <inumber>\n");
@@ -214,9 +214,11 @@ static int do_copyout( int inumber, const char *filename )
 	}
 
 	while(1) {
+        printf("offset size: %d\n", offset);
 		result = fs_read(inumber,buffer,sizeof(buffer),offset);
+        printf("result size: %d\n", result);
 		if(result<=0) break;
-		fwrite(buffer,1,result,file);
+		/* fwrite(buffer,1,result,file); */
 		offset += result;
 	}
 

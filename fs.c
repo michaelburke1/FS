@@ -34,19 +34,19 @@ union fs_block {
 	char data[DISK_BLOCK_SIZE];
 };
 
-int MOUNTED = 0; 
+int MOUNTED = 0;
 int *bitmap;
 
 int fs_format()
 {
     if (MOUNTED)
     {
-        return 0; 
+        return 0;
     }
 
     int diskSize = disk_size();
 
-    int inodes = diskSize / 10; 
+    int inodes = diskSize / 10;
     if (inodes == 0)
     {
         inodes = 1;
@@ -54,10 +54,10 @@ int fs_format()
 
     union fs_block sb;
 
-    sb.super.magic = FS_MAGIC; 
+    sb.super.magic = FS_MAGIC;
     sb.super.nblocks = diskSize;
     sb.super.ninodeblocks = inodes;
-    sb.super.ninodes = 0; 
+    sb.super.ninodes = 0;
 
     disk_write(0, sb.data);
 
@@ -92,7 +92,7 @@ void fs_debug()
     int inodeblocks = block.super.ninodeblocks;
     int inodes = block.super.ninodes;
     int currInodes = 0;
-    
+
     int i, j, k, l;
     for (i = 0; i < inodeblocks; i++)
     {
@@ -113,7 +113,7 @@ void fs_debug()
                         printf("%d ", block.inode[j].direct[k]);
                 }
                 printf("\n");
-                if (block.inode[j].indirect != 0) 
+                if (block.inode[j].indirect != 0)
                 {
                     printf("     indirect block: %d\n", block.inode[j].indirect);
                     printf("     indirect data blocks: ");
@@ -140,7 +140,7 @@ int fs_mount()
         printf("on no!");
         return 0;
     }
-    
+
     union fs_block sbTest;
 
     disk_read(0, sbTest.data);
@@ -148,16 +148,16 @@ int fs_mount()
     if (sbTest.super.magic != FS_MAGIC)
     {
         return 0;
-    }   
+    }
 
     int diskSize = disk_size();
     bitmap = malloc(sizeof(int)*diskSize);
-    
-    
+
+
     bitmap[0] = 1;
 
     int i, j, k;
-    
+
     for (i = 0; i <= sbTest.super.ninodeblocks; i++)
     {
         bitmap[i] = 1;
@@ -180,7 +180,7 @@ int fs_mount()
                     {
                         if (block.inode[j].direct[k] != 0)
                         {
-                            bitmap[curr] = 1; 
+                            bitmap[curr] = 1;
                             curr++;
                         }
                     }
@@ -227,12 +227,12 @@ int fs_create()
             if (curr.inode[j].isvalid == 0)
             {
                 curr.inode[j].isvalid = 1;
-                curr.inode[j].size = 0; 
+                curr.inode[j].size = 0;
                 return (i-1)*128 + j;
             }
         }
     }
-    
+
 	return 0;
 }
 
@@ -242,7 +242,7 @@ int fs_delete( int inumber )
     {
         return 0;
     }
-    
+
     int index = 1 + inumber / 128;
 
     union fs_block block;
@@ -277,7 +277,7 @@ int fs_getsize( int inumber )
     {
         return -1;
     }
-    
+
     int index = 1 + inumber / 128;
 
     union fs_block block;
@@ -301,13 +301,13 @@ int fs_read( int inumber, char *data, int length, int offset )
     {
         return -1;
     }
-   
+
     if (!MOUNTED)
     {
         printf("not mounted\n");
         return -1;
     }
-    
+
     int index = 1 + inumber / 128;  // block to read
 
     union fs_block block;
@@ -318,15 +318,15 @@ int fs_read( int inumber, char *data, int length, int offset )
 
     int cLen = ceil(length % 4096); // number of blocks to copy
     //int tmpLen = length;            // amount left to copy
-    
+
     int curr = ceil(offset / 4096); // which pointer to start at
 
     int tmpOff = offset % 4096;     // what bytes to start at
 
-    int currData = 1;               // amount we've copied
+    int currData = 0;               // amount we've copied
 
     int i;
-    
+
     //printf("starting at block %d and ending at %d\n", curr, cLen + curr);
 
     //union fs_block indir;
@@ -336,6 +336,9 @@ int fs_read( int inumber, char *data, int length, int offset )
         if (curr < 5)               // if we are still in direct blocks
         {
     //        printf("\n\nReading direct block %d\n\n", curr);
+            if (block.inode[index].direct[curr] == 0)
+                return currData;
+
             disk_read(block.inode[index].direct[curr], copyBlock.data);
             for (i = tmpOff - 1; i < 4096; i++)
             {
@@ -349,11 +352,11 @@ int fs_read( int inumber, char *data, int length, int offset )
             cLen--;
             tmpOff = 0;
             curr++;
-        } 
+        }
         else if (curr == 5)
         {
             //union fs_block
-            disk_read(block.inode[index].indirect, copyBlock.data); 
+            disk_read(block.inode[index].indirect, copyBlock.data);
             //union fs_block indir;
             int j = 0;
 
