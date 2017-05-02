@@ -214,11 +214,11 @@ static int do_copyout( int inumber, const char *filename )
 	}
 
 	while(1) {
-        printf("offset size: %d\n", offset);
+        //printf("offset size: %d\n", offset);
 		result = fs_read(inumber,buffer,sizeof(buffer),offset);
-        printf("result size: %d\n", result);
+        //printf("result size: %d\n", result);
 		if(result<=0) break;
-		/* fwrite(buffer,1,result,file); */
+		fwrite(buffer,1,result,file); 
 		offset += result;
 	}
 
