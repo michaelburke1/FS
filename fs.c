@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
+#include <math.h>
 
 #define FS_MAGIC           0xf0f03410
 #define INODES_PER_BLOCK   128
@@ -33,9 +34,42 @@ union fs_block {
 	char data[DISK_BLOCK_SIZE];
 };
 
+int MOUNTED = 0; 
+int *bitmap;
+
 int fs_format()
 {
-	return 0;
+    if (MOUNTED)
+    {
+        return 0; 
+    }
+
+    int diskSize = disk_size();
+
+    int inodes = diskSize / 10; 
+    if (inodes == 0)
+    {
+        inodes = 1;
+    }
+
+    union fs_block sb;
+
+    sb.super.magic = FS_MAGIC; 
+    sb.super.nblocks = diskSize;
+    sb.super.ninodeblocks = inodes;
+    sb.super.ninodes = 0; 
+
+    disk_write(0, sb.data);
+
+    int i;
+
+    for (i = 1; i <= inodes; i++)
+    {
+        union fs_block block;
+        disk_write(i, block.data);
+    }
+
+    return 1;
 }
 
 void fs_debug()
@@ -56,15 +90,20 @@ void fs_debug()
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes\n",block.super.ninodes);
     int inodeblocks = block.super.ninodeblocks;
-
+    int inodes = block.super.ninodes;
+    int currInodes = 0;
+    
     int i, j, k, l;
     for (i = 0; i < inodeblocks; i++)
     {
         disk_read(i, block.data);
+
+    //    printf("%d", block.super.magic);
         for (j = 1; j < INODES_PER_BLOCK; j++)
         {
-            if (block.inode[j].isvalid)
+            if (block.inode[j].isvalid && currInodes < inodes)
             {
+                currInodes++;
                 printf("Inode %d: valid\n", j);
                 printf("     size: %d bytes\n", block.inode[j].size);
                 printf("     direct blocks: ");
@@ -96,27 +135,169 @@ void fs_debug()
 
 int fs_mount()
 {
-	return 0;
+    if (MOUNTED == 1)
+    {
+        printf("on no!");
+        return 0;
+    }
+
+    union fs_block sbTest;
+
+    disk_read(0, sbTest.data);
+
+    if (sbTest.super.magic != FS_MAGIC)
+    {
+        return 0;
+    }   
+
+    int diskSize = disk_size();
+    bitmap = malloc(sizeof(int)*diskSize);
+    
+    
+    bitmap[0] = 1;
+
+    int i, j, k, l;
+    
+    for (i = 0; i <= sbTest.super.ninodeblocks; i++)
+    {
+        bitmap[i] = 1;
+    }
+    int curr = sbTest.super.ninodeblocks + 1;
+    for (i = 1; i <= sbTest.super.ninodeblocks; i++)
+    {
+        union fs_block block;
+        disk_read(i, block.data);
+        for (j = 0; j < INODES_PER_BLOCK; j++)
+        {
+            if (block.inode[j].isvalid != 0)
+            {
+                //bitmap[curr] = 1;
+                //curr++;
+                int nBlocks = ceil(block.inode[j].size / 4096);
+                if (nBlocks <= 5)
+                {
+                    for (k = 0; k < nBlocks; k++)
+                    {
+                        if (block.inode[j].direct[k] != 0)
+                        {
+                            bitmap[curr] = 1; 
+                            curr++;
+                        }
+                    }
+                }
+                else if (nBlocks > 5)
+                {
+                    for (k = 0; k < 6; k++)
+                    {
+                        bitmap[curr] = 1;
+                        curr++;
+                    }
+                    union fs_block indir;
+                    disk_read(block.inode[j].indirect, indir.data);
+                    for (k = 0; k < nBlocks - 5; k++)
+                    {
+                        bitmap[curr] = 1;
+                        curr++;
+                    }
+                }
+            }
+        }
+    }
+
+    for (i = curr; i < diskSize; i++)
+    {
+        bitmap[i] = 0;
+    }
+
+	return 1;
 }
 
 int fs_create()
 {
+    union fs_block block;
+    disk_read(0, block.data);
+    int inodeBlocks = block.super.ninodeblocks;
+    int i, j;
+    for (i = 1; i <= inodeBlocks; i++)
+    {
+        union fs_block curr;
+        disk_read(i, curr.data);
+        for (j = 0; j < INODES_PER_BLOCK; j++)
+        {
+            if (curr.inode[j].isvalid == 0)
+            {
+                curr.inode[j].isvalid = 1;
+                curr.inode[j].size = 0; 
+                return (i-1)*128 + j;
+            }
+        }
+    }
+    
 	return 0;
 }
 
 int fs_delete( int inumber )
 {
-	return 0;
+    if (inumber < 1)
+    {
+        return 0;
+    }
+    
+    int index = 1 + inumber / 128;
+
+    union fs_block block;
+
+    disk_read(index, block.data);
+
+    index = index % 128;
+
+    if (block.inode[index].isvalid == 0)
+    {
+        return 0;
+    }
+
+    block.inode[index].isvalid = 0;
+    block.inode[index].size = 0;
+
+    int i;
+
+    for (i = 0; i < POINTERS_PER_INODE; i++)
+    {
+        block.inode[index].direct[i] = 0;
+    }
+
+    block.inode[index].indirect = 0;
+
+	return 1;
 }
 
 int fs_getsize( int inumber )
 {
-	return -1;
+    if (inumber < 1)
+    {
+        return -1;
+    }
+    
+    int index = 1 + inumber / 128;
+
+    union fs_block block;
+
+    disk_read(index, block.data);
+
+    index = index % 128;
+
+    if (block.inode[index].isvalid == 0)
+    {
+        return -1;
+    }
+    return block.inode[index].size;
+
 }
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
-	return 0;
+
+    return 0;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
