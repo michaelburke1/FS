@@ -140,7 +140,7 @@ int fs_mount()
         printf("on no!");
         return 0;
     }
-
+    
     union fs_block sbTest;
 
     disk_read(0, sbTest.data);
@@ -156,7 +156,7 @@ int fs_mount()
     
     bitmap[0] = 1;
 
-    int i, j, k, l;
+    int i, j, k;
     
     for (i = 0; i <= sbTest.super.ninodeblocks; i++)
     {
@@ -208,7 +208,7 @@ int fs_mount()
     {
         bitmap[i] = 0;
     }
-
+    MOUNTED = 1;
 	return 1;
 }
 
@@ -297,7 +297,93 @@ int fs_getsize( int inumber )
 int fs_read( int inumber, char *data, int length, int offset )
 {
 
-    return 0;
+    if (inumber < 1)
+    {
+        return -1;
+    }
+   
+    if (!MOUNTED)
+    {
+        printf("not mounted\n");
+        return -1;
+    }
+    
+    int index = 1 + inumber / 128;  // block to read
+
+    union fs_block block;
+
+    disk_read(index, block.data);   // read in block that has inode
+
+    index = inumber % 128;          // get inode from inode block
+
+    int cLen = ceil(length % 4096); // number of blocks to copy
+    //int tmpLen = length;            // amount left to copy
+    
+    int curr = ceil(offset / 4096); // which pointer to start at
+
+    int tmpOff = offset % 4096;     // what bytes to start at
+
+    int currData = 1;               // amount we've copied
+
+    int i;
+    
+    //printf("starting at block %d and ending at %d\n", curr, cLen + curr);
+
+    //union fs_block indir;
+    while (currData < length)
+    {
+        union fs_block copyBlock;
+        if (curr < 5)               // if we are still in direct blocks
+        {
+    //        printf("\n\nReading direct block %d\n\n", curr);
+            disk_read(block.inode[index].direct[curr], copyBlock.data);
+            for (i = tmpOff - 1; i < 4096; i++)
+            {
+                if (currData == length)
+                {
+                    return currData;
+                }
+                data[currData] = copyBlock.data[i];
+                currData++;
+            }
+            cLen--;
+            tmpOff = 0;
+            curr++;
+        } 
+        else if (curr == 5)
+        {
+            //union fs_block
+            disk_read(block.inode[index].indirect, copyBlock.data); 
+            //union fs_block indir;
+            int j = 0;
+
+            while (copyBlock.pointers[j] > 0)
+            {
+      //          printf("\n\n\nReading indirect block %d\n\n\n", j);
+                union fs_block indir;
+                disk_read(copyBlock.pointers[j], indir.data);
+
+                for (i = tmpOff; i < 4096; i++)
+                {
+                    if (currData == length)
+                    {
+                        return currData;
+                    }
+                    data[currData] = indir.data[i];
+                    currData++;
+                }
+                tmpOff = 0;
+                //curr = 0;
+                j++;
+ //               printf("i1n\n");
+            }
+            curr++;
+            return currData;
+        }
+    //    printf("Curr: %d Goal: %d\n", currData, length);
+    }
+
+    return currData;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
