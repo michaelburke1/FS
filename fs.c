@@ -83,7 +83,7 @@ int fs_format()
 
     int i, j, k;
 
-    for (i = 1; i <= inodes; i++)
+    for (i = 1; i <= inodes; i++) // initialize all inods to not valid, size 0, direct blocks to 0, and indirect 0 
     {
         union fs_block block;
         disk_read(i, block.data);
@@ -195,19 +195,20 @@ int fs_mount()
         return 0;
     }
 
+    // initialize the bitmap
     int diskSize = disk_size();
     bitmap = malloc(sizeof(int)*diskSize);
 
     int i, j, k;
 
-    for (i = 0; i < disk_size(); i++)
+    for (i = 0; i < disk_size(); i++) // initialize all to 0
     {
         bitmap[i] = 0;
     }
 
-    bitmap[0] = 1;
+    bitmap[0] = 1; // superblock to 1
 
-    for (i = 0; i <= sbTest.super.ninodeblocks; i++)
+    for (i = 0; i <= sbTest.super.ninodeblocks; i++) // inodes to 1
     {
         bitmap[i] = 1;
     }
@@ -217,10 +218,10 @@ int fs_mount()
         disk_read(i, block.data);
         for (j = 0; j < INODES_PER_BLOCK; j++)
         {
-            if (block.inode[j].isvalid != 0)
+            if (block.inode[j].isvalid != 0) // see if direct and indirect blocks in use, if so, set their bitmap to 1
             {
                 int nBlocks = ceil(block.inode[j].size / (double)4096);
-                if (nBlocks <= POINTERS_PER_INODE)
+                if (nBlocks <= POINTERS_PER_INODE) // if only direct blocks
                 {
                     for (k = 0; k < nBlocks; k++)
                     {
@@ -235,7 +236,7 @@ int fs_mount()
                     }
                     disk_write(i, block.data);
                 }
-                else if (nBlocks > POINTERS_PER_INODE)
+                else if (nBlocks > POINTERS_PER_INODE) // if there are indirect blocks
                 {
                     for (k = 0; k < POINTERS_PER_INODE; k++)
                     {
@@ -272,10 +273,12 @@ int fs_create()
     }
 
     union fs_block block;
-    disk_read(0, block.data);
+    disk_read(0, block.data); // read superblock
+    
     int inodeBlocks = block.super.ninodeblocks;
+    
     int i, j;
-    for (i = 1; i <= inodeBlocks; i++)
+    for (i = 1; i <= inodeBlocks; i++) // check each inode block for free inode
     {
         union fs_block curr;
         disk_read(i, curr.data);
@@ -285,18 +288,10 @@ int fs_create()
             {
                 curr.inode[j].isvalid = 1;
                 curr.inode[j].size = 0;
-                printf("%d\n", (i-1)*INODES_PER_BLOCK + j);
-                disk_write(0, block.data);
+                disk_write(0, block.data); // save changes
                 disk_write(i, curr.data);
-                return (i-1)*INODES_PER_BLOCK + j;
+                return (i-1)*INODES_PER_BLOCK + j; // return position of inode
             }
-        }
-    }
-    for (i = 0; i < disk_size(); i++)
-    {
-        if (bitmap[i] == 0)
-        {
-            return i;
         }
     }
 
@@ -410,20 +405,20 @@ int fs_read( int inumber, char *data, int length, int offset )
                 return currData;
             }
 
-            disk_read(block.inode[index].direct[curr], copyBlock.data);
+            disk_read(block.inode[index].direct[curr], copyBlock.data); // readin direct block
             for (i = tmpOff; i < 4096; i++)
             {
                 if (currData == length)
                 {
-                    return currData;
+                    return currData; // return if all data read in
                 }
-                data[currData] = copyBlock.data[i];
+                data[currData] = copyBlock.data[i]; // copy data
                 currData++;
             }
             tmpOff = 0;
             curr++;
         }
-        else if (curr >= POINTERS_PER_INODE)
+        else if (curr >= POINTERS_PER_INODE)    // going into indirect blocks
         {
             disk_read(block.inode[index].indirect, copyBlock.data);
             int j = curr % POINTERS_PER_INODE;
@@ -436,7 +431,7 @@ int fs_read( int inumber, char *data, int length, int offset )
                 {
                     if (currData == length)
                     {
-                        return currData;
+                        return currData; // return if all data read in
                     }
                     data[currData] = indir.data[i];
                     currData++;
@@ -474,7 +469,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
     int index = inumber % INODES_PER_BLOCK;          // get inode from inode block
 
-    if (block.inode[index].isvalid == 0)
+    if (block.inode[index].isvalid == 0)        // if inode is not valid
     {
         printf("fs_write Error: inode not valid\n");
         return 0;
@@ -484,7 +479,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
     int tmpOff = offset % 4096;     // what bytes to start at
 
-    int toCopy = length;
+    int toCopy = length;            // amount we still need to write
 
     int overLap = block.inode[index].size - length; // bytes of data that will be overwritten
 
@@ -492,7 +487,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
     if (offset > newSize)
     {
-        newSize = offset;
+        newSize = offset; // in case we are writing past the current data
     }
 
     int currData = 0;               // amount we've writen
@@ -503,12 +498,9 @@ int fs_write( int inumber, const char *data, int length, int offset )
         union fs_block writeBlock;
         if (curr < POINTERS_PER_INODE)      // if we are still in direct blocks
         {
-            printf("before direct: %d\n", block.inode[index].direct[curr]);
-            if (block.inode[index].direct[curr] == 0)
+            if (block.inode[index].direct[curr] == 0) // no if direct block, find next open block 
             {
-                printf("it should be zero %d\n", block.inode[index].direct[curr]);
                 block.inode[index].direct[curr] = nextOpen();
-                printf("after %d\n", block.inode[index].direct[curr]);
 
                 if (block.inode[index].direct[curr] < 1)
                 {
@@ -517,10 +509,10 @@ int fs_write( int inumber, const char *data, int length, int offset )
                 }
             }
 
-            disk_read(block.inode[index].direct[curr], writeBlock.data);
+            disk_read(block.inode[index].direct[curr], writeBlock.data); // read in direct pointer
             for (i = tmpOff; i < 4096; i++)
             {
-                if (toCopy == 0)
+                if (toCopy == 0) // if we are finished writing...
                 {
                     disk_write(block.inode[index].direct[curr], writeBlock.data);
                     block.inode[index].size = newSize;
@@ -528,7 +520,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
                     return currData;
                 }
 
-                if (overLap <= 0)
+                if (overLap <= 0) // if we are done overwriting data and now writing new data
                 {
                     newSize++;
                 }
@@ -542,15 +534,15 @@ int fs_write( int inumber, const char *data, int length, int offset )
             tmpOff = 0;
             curr++;
         }
-        else if (curr >= POINTERS_PER_INODE)
+        else if (curr >= POINTERS_PER_INODE) // if we are in the indirect blocks
         {
             if (block.inode[index].indirect == 0)
-            {
+            { // if no indirect block set yet...
                 block.inode[index].indirect = nextOpen();
                 disk_read(block.inode[index].indirect, writeBlock.data);
                 int g;
                 for (g = 0; g < POINTERS_PER_BLOCK; g++)
-                {
+                { // initialize pointers to 0
                     writeBlock.pointers[g] = 0;
                 }
             }
@@ -569,16 +561,13 @@ int fs_write( int inumber, const char *data, int length, int offset )
             }
         
             int j = curr % POINTERS_PER_INODE;
-
+                // find current block
             while (toCopy > 0)
             {
                 union fs_block indir;
-                printf("before: %d\n", writeBlock.pointers[j]);
                 if (writeBlock.pointers[j] == 0)
-                {
-                    printf("should be 0: %d\n", writeBlock.pointers[j]);
+                { // if indirect pointer not set to block....
                     writeBlock.pointers[j] = nextOpen();
-                    printf("open block is %d\n", writeBlock.pointers[j]);
                     if (writeBlock.pointers[j] <= 0)
                     {
                         writeBlock.pointers[j] = 0;
@@ -593,7 +582,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
                 for (i = tmpOff; i < 4096; i++)
                 {
-                    if (toCopy == 0)
+                    if (toCopy == 0) // if done writing....
                     {
                         block.inode[index].size = newSize;
                         disk_write(writeBlock.pointers[j], indir.data);
