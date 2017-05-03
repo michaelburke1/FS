@@ -37,10 +37,10 @@ union fs_block {
 int MOUNTED = 0;
 int *bitmap;
 
-int nextOpen() 
+int nextOpen() //look for the next free block using the FBB
 {
     int i;
-    
+
     for (i = 0; i < disk_size(); i++)
     {
         if (bitmap[i] == 0)
@@ -60,12 +60,13 @@ int fs_format()
 {
     if (MOUNTED)
     {
+        printf("fs_format Error: a filesystem is already mounted\n");
         return 0;
     }
 
     int diskSize = disk_size();
 
-    int inodes = diskSize / 10;
+    int inodes = diskSize / 10; //reserve 10% for inodes
     if (inodes == 0)
     {
         inodes = 1;
@@ -73,10 +74,10 @@ int fs_format()
 
     union fs_block sb;
 
-    sb.super.magic = FS_MAGIC;
+    sb.super.magic = FS_MAGIC; //set the data for the suberblock
     sb.super.nblocks = diskSize;
     sb.super.ninodeblocks = inodes;
-    sb.super.ninodes = 128*inodes;
+    sb.super.ninodes = INODES_PER_BLOCK*inodes;
 
     disk_write(0, sb.data);
 
@@ -89,7 +90,7 @@ int fs_format()
         for ( j = 0; j < INODES_PER_BLOCK; j++)
         {
             block.inode[j].isvalid = 0;
-            printf("inode %d isvalid: %d\n", (i-1)*128 + j, block.inode[j].isvalid);
+            /* printf("inode %d isvalid: %d\n", (i-1)*128 + j, block.inode[j].isvalid); */
             block.inode[j].size = 0;
             for (k = 0; k < 5; k++)
             {
@@ -109,19 +110,20 @@ void fs_debug()
 
 	disk_read(0,block.data);
 
-
-
 	printf("superblock:\n");
 	if (block.super.magic == FS_MAGIC)
     {
         printf("    magic number is valid\n");
-    } else
+    }
+    else
     {
         printf("    magic number is not valid\n");
     }
+
     printf("    %d blocks\n",block.super.nblocks);
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes\n",block.super.ninodes);
+
     int inodeblocks = block.super.ninodeblocks;
     int inodes = block.super.ninodes;
     int currInodes = 0;
@@ -155,7 +157,7 @@ void fs_debug()
                         }
                         printf("\n");
                     }
-                    else 
+                    else
                     {
                         for (k = 0; k < 5; k++)
                         {
@@ -163,10 +165,10 @@ void fs_debug()
                         }
                         printf("\n");
                         printf("     indirect block: %d\n", block.inode[j].indirect);
-                        printf("     indirect data blocks: "); 
+                        printf("     indirect data blocks: ");
                         union fs_block indir;
                         disk_read(block.inode[j].indirect, indir.data);
-                        for (k = 0; k < nBlocks - 5; k++)
+                        for (k = 0; k < nBlocks - POINTERS_PER_INODE; k++)
                         {
                             printf("%d ", indir.pointers[k]);
                         }
@@ -182,7 +184,7 @@ int fs_mount()
 {
     if (MOUNTED == 1)
     {
-        printf("on no!");
+        printf("fs_mount Error: a filesystem is already mounted\n");
         return 0;
     }
 
@@ -192,6 +194,7 @@ int fs_mount()
 
     if (sbTest.super.magic != FS_MAGIC)
     {
+        printf("fs_mount Error: bad magic number on superblock\n");
         return 0;
     }
 
@@ -199,7 +202,7 @@ int fs_mount()
     bitmap = malloc(sizeof(int)*diskSize);
 
     int i, j, k;
-    
+
     for (i = 0; i < disk_size(); i++)
     {
         bitmap[i] = 0;
@@ -220,7 +223,7 @@ int fs_mount()
             if (block.inode[j].isvalid != 0)
             {
                 int nBlocks = ceil(block.inode[j].size / (double)4096);
-                if (nBlocks <= 5)
+                if (nBlocks <= POINTERS_PER_INODE)
                 {
                     for (k = 0; k < nBlocks; k++)
                     {
@@ -230,15 +233,15 @@ int fs_mount()
                         }
                     }
                 }
-                else if (nBlocks > 5)
+                else if (nBlocks > POINTERS_PER_INODE)
                 {
-                    for (k = 0; k < 5; k++)
+                    for (k = 0; k < POINTERS_PER_INODE; k++)
                     {
                         bitmap[block.inode[j].direct[k]] = 1;
                     }
                     union fs_block indir;
                     disk_read(block.inode[j].indirect, indir.data);
-                    for (k = 0; k < nBlocks - 5; k++)
+                    for (k = 0; k < nBlocks - POINTERS_PER_INODE; k++)
                     {
                         bitmap[indir.pointers[k]] = 1;
                     }
@@ -256,6 +259,7 @@ int fs_create()
 
     if (!MOUNTED)
     {
+        printf("fs_create Error: please mount a filesystem first\n");
         return 0;
     }
 
@@ -273,10 +277,10 @@ int fs_create()
             {
                 curr.inode[j].isvalid = 1;
                 curr.inode[j].size = 0;
-                printf("%d\n", (i-1)*128 + j);
+                printf("%d\n", (i-1)*INODES_PER_BLOCK + j);
                 disk_write(0, block.data);
                 disk_write(i, curr.data);
-                return (i-1)*128 + j;
+                return (i-1)*INODES_PER_BLOCK + j;
             }
         }
     }
@@ -295,16 +299,17 @@ int fs_delete( int inumber )
 {
     if (inumber < 1)
     {
+        printf("fs_delete Error: invalid inode number\n");
         return 0;
     }
 
-    int index = 1 + inumber / 128;
+    int index = 1 + inumber / INODES_PER_BLOCK;
 
     union fs_block block;
 
     disk_read(index, block.data);
 
-    index = index % 128;
+    index = index % INODES_PER_BLOCK;
 
     if (block.inode[index].isvalid == 0)
     {
@@ -330,19 +335,21 @@ int fs_getsize( int inumber )
 {
     if (inumber < 1)
     {
+        printf("fs_getsize Error: invalid inode number\n");
         return -1;
     }
 
-    int index = 1 + inumber / 128;
+    int index = 1 + inumber / INODES_PER_BLOCK;
 
     union fs_block block;
 
     disk_read(index, block.data);
 
-    index = index % 128;
+    index = index % INODES_PER_BLOCK;
 
     if (block.inode[index].isvalid == 0)
     {
+        printf("fs_getsize Error: invalid inode number\n");
         return -1;
     }
     return block.inode[index].size;
@@ -354,24 +361,25 @@ int fs_read( int inumber, char *data, int length, int offset )
 
     if (inumber < 1)
     {
+        printf("fs_read Error: invalid inode number\n");
         return -1;
     }
 
     if (!MOUNTED)
     {
-        printf("not mounted\n");
+        printf("fs_read Error: no filesystem mounted\n");
         return -1;
     }
 
-    int index = 1 + inumber / 128;  // block to read
+    int index = 1 + inumber / INODES_PER_BLOCK;  // block to read
 
     union fs_block block;
 
     disk_read(index, block.data);   // read in block that has inode
 
-    index = inumber % 128;          // get inode from inode block
-    
-    if (length > block.inode[index].size - offset)
+    index = inumber % INODES_PER_BLOCK;          // get inode from inode block
+
+    if (length > block.inode[index].size - offset) //don't read over size
     {
         length = block.inode[index].size - offset;
     }
@@ -387,7 +395,7 @@ int fs_read( int inumber, char *data, int length, int offset )
     while (currData < length)
     {
         union fs_block copyBlock;
-        if (curr < 5)               // if we are still in direct blocks
+        if (curr < POINTERS_PER_INODE)      // if we are still in direct blocks
         {
             if (block.inode[index].direct[curr] == 0)
             {
@@ -407,10 +415,10 @@ int fs_read( int inumber, char *data, int length, int offset )
             tmpOff = 0;
             curr++;
         }
-        else if (curr >= 5)
+        else if (curr >= POINTERS_PER_INODE)
         {
             disk_read(block.inode[index].indirect, copyBlock.data);
-            int j = curr % 5;
+            int j = curr % POINTERS_PER_INODE;
             while (copyBlock.pointers[j] > 0)
             {
                 union fs_block indir;
@@ -440,13 +448,13 @@ int fs_write( int inumber, const char *data, int length, int offset )
 {
     if (inumber < 1)
     {
-        printf("invalid inumber\n");
+        printf("fs_write Error: invalid inode number\n");
         return 0;
     }
 
     if (!MOUNTED)
     {
-        printf("not mounted\n");
+        printf("fs_write Error: filesystem not mounted\n");
         return 0;
     }
 
@@ -457,10 +465,10 @@ int fs_write( int inumber, const char *data, int length, int offset )
     disk_read(origBlock, block.data);   // read in block that has inode
 
     int index = inumber % INODES_PER_BLOCK;          // get inode from inode block
-    
+
     if (block.inode[index].isvalid == 0)
     {
-        printf("inode not valid\n");
+        printf("fs_write Error: inode not valid\n");
         return 0;
     }
 
@@ -468,7 +476,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
     int tmpOff = offset % 4096;     // what bytes to start at
 
-    int toCopy = length; 
+    int toCopy = length;
 
     int overLap = block.inode[index].size - length; // bytes of data that will be overwritten
 
@@ -485,19 +493,19 @@ int fs_write( int inumber, const char *data, int length, int offset )
     while (toCopy > 0)
     {
         union fs_block writeBlock;
-        if (curr < 5)               // if we are still in direct blocks
+        if (curr < POINTERS_PER_INODE)      // if we are still in direct blocks
         {
             if (block.inode[index].direct[curr] == 0)
             {
                 block.inode[index].direct[curr] = nextOpen();
-                
+
                 if (block.inode[index].direct[curr] < 1)
                 {
-                    printf("No more open blocks\n");
+                    printf("fs_write Error: No more open blocks\n");
                     return currData;
                 }
             }
-            
+
             disk_read(block.inode[index].direct[curr], writeBlock.data);
             for (i = tmpOff; i < 4096; i++)
             {
@@ -522,26 +530,26 @@ int fs_write( int inumber, const char *data, int length, int offset )
             tmpOff = 0;
             curr++;
         }
-        else if (curr >= 5)
+        else if (curr >= POINTERS_PER_INODE)
         {
             if (block.inode[index].indirect == 0)
             {
                 block.inode[index].indirect = nextOpen();
-            
+
                 if (block.inode[index].indirect <= 0)
                 {
                     block.inode[index].indirect = 0;
                     block.inode[index].size = newSize;
                     disk_write(origBlock, block.data);
-                    printf("No more open blocks\n");
+                    printf("fs_write Error: No more open blocks\n");
                     return currData;
                 }
             }
 
             disk_read(block.inode[index].indirect, writeBlock.data);
-            
-            int j = curr % 5;
-            
+
+            int j = curr % POINTERS_PER_INODE;
+
             while (toCopy > 0)
             {
                 union fs_block indir;
@@ -554,7 +562,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
                         block.inode[index].size = newSize;
                         disk_write(block.inode[index].indirect, writeBlock.data);
                         disk_write(origBlock, block.data);
-                        printf("no more open blocks\n");
+                        printf("fs_write Error: no more open blocks\n");
                         return currData;
                     }
                 }
@@ -579,7 +587,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
                     currData++;
                     overLap--;
                 }
-                
+
                 disk_write(writeBlock.pointers[j], indir.data);
                 disk_write(block.inode[index].indirect, writeBlock.data);
                 tmpOff = 0;
