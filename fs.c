@@ -90,7 +90,6 @@ int fs_format()
         for ( j = 0; j < INODES_PER_BLOCK; j++)
         {
             block.inode[j].isvalid = 0;
-            /* printf("inode %d isvalid: %d\n", (i-1)*128 + j, block.inode[j].isvalid); */
             block.inode[j].size = 0;
             for (k = 0; k < 5; k++)
             {
@@ -133,7 +132,6 @@ void fs_debug()
     {
         disk_read(i, block.data);
 
-    //    printf("%d", block.super.magic);
         for (j = 1; j < INODES_PER_BLOCK; j++)
         {
             if (block.inode[j].isvalid && currInodes < inodes)
@@ -145,7 +143,6 @@ void fs_debug()
                 {
                     printf("     direct blocks: ");
                     int nBlocks = ceil(block.inode[j].size / (double)4096);
-                    //printf("%d %d\n", block.inode[j].size / 4096, nBlocks);
                     if (nBlocks < 6)
                     {
                         for (k = 0; k < nBlocks; k++)
@@ -232,6 +229,11 @@ int fs_mount()
                             bitmap[block.inode[j].direct[k]] = 1;
                         }
                     }
+                    for (k = nBlocks; k < POINTERS_PER_INODE; k++)
+                    {
+                        block.inode[j].direct[k] = 0;
+                    }
+                    disk_write(i, block.data);
                 }
                 else if (nBlocks > POINTERS_PER_INODE)
                 {
@@ -239,12 +241,18 @@ int fs_mount()
                     {
                         bitmap[block.inode[j].direct[k]] = 1;
                     }
+                    disk_write(i, block.data);
                     union fs_block indir;
                     disk_read(block.inode[j].indirect, indir.data);
                     for (k = 0; k < nBlocks - POINTERS_PER_INODE; k++)
                     {
                         bitmap[indir.pointers[k]] = 1;
                     }
+                    for (k = nBlocks - POINTERS_PER_INODE; k < POINTERS_PER_BLOCK; k++)
+                    {
+                        indir.pointers[k] = 0;
+                    }
+                    disk_write(block.inode[j].indirect, indir.data);
                 }
             }
         }
@@ -495,9 +503,12 @@ int fs_write( int inumber, const char *data, int length, int offset )
         union fs_block writeBlock;
         if (curr < POINTERS_PER_INODE)      // if we are still in direct blocks
         {
+            printf("before direct: %d\n", block.inode[index].direct[curr]);
             if (block.inode[index].direct[curr] == 0)
             {
+                printf("it should be zero %d\n", block.inode[index].direct[curr]);
                 block.inode[index].direct[curr] = nextOpen();
+                printf("after %d\n", block.inode[index].direct[curr]);
 
                 if (block.inode[index].direct[curr] < 1)
                 {
@@ -527,6 +538,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
                 overLap--;
             }
             disk_write(block.inode[index].direct[curr], writeBlock.data);
+            disk_write(origBlock, block.data);
             tmpOff = 0;
             curr++;
         }
@@ -535,27 +547,38 @@ int fs_write( int inumber, const char *data, int length, int offset )
             if (block.inode[index].indirect == 0)
             {
                 block.inode[index].indirect = nextOpen();
-
-                if (block.inode[index].indirect <= 0)
+                disk_read(block.inode[index].indirect, writeBlock.data);
+                int g;
+                for (g = 0; g < POINTERS_PER_BLOCK; g++)
                 {
-                    block.inode[index].indirect = 0;
-                    block.inode[index].size = newSize;
-                    disk_write(origBlock, block.data);
-                    printf("fs_write Error: No more open blocks\n");
-                    return currData;
+                    writeBlock.pointers[g] = 0;
                 }
             }
+            else 
+            {
+                disk_read(block.inode[index].indirect, writeBlock.data);
+            }
 
-            disk_read(block.inode[index].indirect, writeBlock.data);
-
+            if (block.inode[index].indirect <= 0)
+            {
+                block.inode[index].indirect = 0;
+                block.inode[index].size = newSize;
+                disk_write(origBlock, block.data);
+                printf("fs_write Error: No more open blocks\n");
+                return currData;
+            }
+        
             int j = curr % POINTERS_PER_INODE;
 
             while (toCopy > 0)
             {
                 union fs_block indir;
+                printf("before: %d\n", writeBlock.pointers[j]);
                 if (writeBlock.pointers[j] == 0)
                 {
+                    printf("should be 0: %d\n", writeBlock.pointers[j]);
                     writeBlock.pointers[j] = nextOpen();
+                    printf("open block is %d\n", writeBlock.pointers[j]);
                     if (writeBlock.pointers[j] <= 0)
                     {
                         writeBlock.pointers[j] = 0;
@@ -573,7 +596,8 @@ int fs_write( int inumber, const char *data, int length, int offset )
                     if (toCopy == 0)
                     {
                         block.inode[index].size = newSize;
-                        disk_write(indir.pointers[j], indir.data);
+                        disk_write(writeBlock.pointers[j], indir.data);
+                        disk_write(block.inode[index].indirect, writeBlock.data);
                         disk_write(origBlock, block.data);
                         return currData;
                     }
